@@ -1,3 +1,4 @@
+;these imports are not all needed, needs to be weeded
 (ns hiredman.repl
   (:gen-class)
   (require [clojure.main :as r])
@@ -19,6 +20,8 @@
 	  (clojure.lang IDeref Associative LineNumberingPushbackReader IFn
 			IReference)))
 
+;*Q* is the shared queue used for wiring everythhing together
+;$ is bound to call (partial render *Q*)
 (declare *Q* *font* $)
 
 (defn fn->kl [fun]
@@ -96,7 +99,11 @@
 (defmacro log [string]
   `(.info (Logger/getLogger "global") ~string))
 
-(defmacro react-on [[q to predicate as x] & body]
+(defmacro react-on
+  "Takes a hydra, and on another thread, filters the body for events
+   with (:type event) == predicate. and for each event that matches,
+   the body is executed with the payload of the event bound as x"
+  [[q to predicate as x] & body]
   `(future
     (doseq [~x (map :payload
 		    (filter (fn [x#] (= ~predicate (:type x#)))
