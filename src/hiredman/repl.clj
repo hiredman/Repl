@@ -53,8 +53,10 @@
   "paints an Image on a JComponent"
   [x]
   (doto (proxy [JComponent] []
+	  (getSize [] (Dimension. (.getWidth x) (.getHeight x)))
 	  (paint [g]
 		 (. g (drawImage x 0 0 nil))))
+    (.setSize (Dimension. (.getWidth x) (.getHeight x)))
     (.setPreferredSize (Dimension. (.getWidth x) (.getHeight x)))))
 
 (defn scale
@@ -158,45 +160,13 @@
 
 (defmethod render Image [Q image]
   (Q (event ::render
-	    #(image-component (scale image (.getBounds %))))))
+	    #(try (image-component
+		   (scale image (Rectangle. (.getWidth (.getVisibleRect $))
+					    300)))
+		  (catch Exception e
+		    (JTextArea. (pr-str e)))))))
 
 (def last-prompt (atom nil))
-
-(defn prompt [Q]
-  (let [parens (atom ())
-	jta (JTextArea.)]
-    (doto jta
-      (-> (#(swap! last-prompt (constantly %))))
-      (.setDocument
-       (proxy [PlainDocument] []
-	 (insertString [off str att]
-	   (log (format "%s to %s"
-			(pr-str [off str att])
-			(pr-str (.getText jta))))
-	   (condp = str
-	     "(" (swap! parens conj str)
-	     ")" (swap! parens pop)
-	     nil)
-	   (if (and (= str "\n")
-		    #_(empty? @parens)
-		    (not (.isEmpty (.getText jta))))
-	     (future
-	      (log ":go web go:")
-	      (Q (event ::read
-			(try
-			 (-> jta
-			     .getText
-			     StringReader.
-			     PushbackReader.)
-			 (catch Exception e
-			   (-> "" StringReader. PushbackReader.)))))
-	      (EDT (.setEditable jta false)
-		   (.addMouseListener
-		    jta
-		    (fn->mia
-		     (fn [e]
-		       (Q (event ::text-input-focus nil)))))))
-	     (proxy-super insertString off str att))))))))
 
 (defn to-read [Q string]
   (Q (event ::read
@@ -282,4 +252,19 @@
     (start-repl-thread Q)
     Q))
 
-(defn -main [] (repl))
+(defn write-history [name]
+  (with-open [o (-> name java.io.File. java.io.FileWriter.)]
+    (binding [*out* o]
+      (doseq [i (-> *Q* meta :history :items)] (println i)))))
+
+(defn load-history [name]
+  (with-open [i (-> name java.io.File. java.io.FileReader.
+		    java.io.PushbackReader.)]
+    (let [o (Object.)]
+      (loop [r (read i false o)]
+	(when (not= r o)
+	  (alter-meta! *Q* update-in [:history :items] conj (pr-str r))))))
+  (alter-meta! *Q* update-in [:history :place]
+	       (constantly (-> *Q* meta :history :items count))))
+
+(defn -main [] (repl) nil)
