@@ -81,16 +81,19 @@
 
 (def scroll-back 20)
 
+(defn- scroll-pane [here]
+  (doto (JScrollPane.
+	 (doto here
+	   (.setLayout (BoxLayout. here (. BoxLayout Y_AXIS)))))
+    (.setVerticalScrollBarPolicy
+     JScrollPane/VERTICAL_SCROLLBAR_ALWAYS)
+    (.setHorizontalScrollBarPolicy
+     JScrollPane/HORIZONTAL_SCROLLBAR_AS_NEEDED)))
+
 (defn window [Q]
   (let [frame (JFrame. "Clojure")
 	here (JPanel.)
-	scroll (doto (JScrollPane.
-		      (doto here
-			(.setLayout (BoxLayout. here (. BoxLayout Y_AXIS)))))
-		 (.setVerticalScrollBarPolicy
-		  JScrollPane/VERTICAL_SCROLLBAR_ALWAYS)
-		 (.setHorizontalScrollBarPolicy
-		  JScrollPane/HORIZONTAL_SCROLLBAR_AS_NEEDED))]
+	scroll (scroll-pane here)]
     (EDT
      (doto frame
        (.add scroll)
@@ -178,42 +181,39 @@
    (fn [pair] (-> pair set (filter string) count (mod 2) zero?))
    pairs)))
 
+(defn- fire [Q jta txt off att this]
+  (EDT (.setEditable jta false))
+  (.addMouseListener jta
+   (fn->mia
+    (fn [m]
+      (Q (event ::focus-last nil)))))
+  (future
+   (to-read Q txt)
+   (alter-meta! Q update-in [:history :items] conj txt)
+   (alter-meta! Q update-in [:history :place]
+		(fn [_]
+		  (-> Q meta :history :items count dec))))
+  (proxy-super insertString off "" att))
+
 (defn- prompt-document [Q jta]
   (log "prompt-document")
-  (let [sc (StyleContext.)
-	h2 (doto (.addStyle sc "parens" nil)
-	     (.addAttribute StyleConstants/Foreground Color/RED))]
-    (doto
-	(proxy [DefaultStyledDocument] [sc]
-	  (insertString [off string att]
-			(log "insertString")
-			#_(when (.contains string "\n")
-			    (EDT (.setRows jta (inc (.getRows jta)))))
-			(let [txt (.getText jta)]
-			  (log "letone")
-			  (if (and (= string "\n")
-				   (re-find #"\S" txt)
-				   (balanced? txt))
-			    (do
-			      (EDT (.setEditable jta false))
-			      (future
-			       (to-read Q txt)
-			       (alter-meta! Q update-in [:history :items]
-					    conj txt)
-			       (alter-meta! Q update-in [:history :place]
-					    (fn [_]
-					      (-> Q meta :history
-						  :items count dec))))
-			      (proxy-super insertString off "" att))
-			    (do
-			      (proxy-super insertString off string
-					   att)
-			      (when-let [x ((comp first filter)
-					    #(= string (str (first %)))
-					    pairs)]
-				(proxy-super
-				 insertString (inc off) (str (second x)) att)
-				(.setDot (.getCaret jta) (inc off)))))))))))
+  (let [sc (StyleContext.)]
+    (proxy [DefaultStyledDocument] [sc]
+      (insertString [off string att]
+		    (log "insertString")
+		    (let [txt (.getText jta)]
+		      (if (and (= string "\n")
+			       (re-find #"\S" txt)
+			       (balanced? txt))
+			(fire Q jta txt off att this)
+			(do
+			  (proxy-super insertString off string att)
+			  (when-let [x ((comp first filter)
+					#(= string (str (first %)))
+					pairs)]
+			    (proxy-super
+			     insertString (inc off) (str (second x)) att)
+			    (.setDot (.getCaret jta) (inc off))))))))))
 
 (defn prompt [Q]
   (log "prompt")
