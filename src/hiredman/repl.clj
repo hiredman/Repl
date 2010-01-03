@@ -1,3 +1,6 @@
+;; Repl runs basically by message passing over a shared bus/queue
+;; the queue it uses is a hydra, see hydra.clj
+
 ;these imports are not all needed, needs to be weeded
 (ns hiredman.repl
   (:gen-class)
@@ -81,7 +84,10 @@
 
 (def scroll-back 20)
 
-(defn- scroll-pane [here]
+(defn- scroll-pane
+  "this is not a function for reusability, but modularity.
+   the window function was getting to honking long"
+  [here]
   (doto (JScrollPane.
 	 (doto here
 	   (.setLayout (BoxLayout. here (. BoxLayout Y_AXIS)))))
@@ -90,7 +96,9 @@
     (.setHorizontalScrollBarPolicy
      JScrollPane/HORIZONTAL_SCROLLBAR_AS_NEEDED)))
 
-(defn window [Q]
+(defn window
+  "this function creates the JFrame, and sets up the gui"
+  [Q]
   (let [frame (JFrame. "Clojure")
 	here (JPanel.)
 	scroll (scroll-pane here)]
@@ -124,7 +132,8 @@
     frame))
 
 
-(defmulti render (fn [a b] (type b)))
+(defmulti #^{:doc "used to render something to the repl"}
+  render (fn [a b] (type b)))
 
 (defmethod render String [Q string]
   (Q (event ::render
@@ -161,25 +170,34 @@
 		  (catch Exception e
 		    (JTextArea. (pr-str e)))))))
 
+;unused? intent is for keeping track of last rendered thing, so all
+;mouse listeners can redirect focus to last rendered thing. this is
+;global state, other solutions more desirable
 (def last-prompt (atom nil))
 
-(defn to-read [Q string]
+(defn to-read
+  "takes a string and a Q and preps the string for binding to *in* and dumps
+   into Q"
+  [Q string]
   (Q (event ::read
 	    (-> string
 		StringReader.
 		PushbackReader.))))
 
-(def pairs '((\( \))
+(def #^{:doc "balanced pairs"}
+     pairs '((\( \))
 	     (\[ \])
 	     (\" \")
 	     (\{ \})))
 
-(defn balanced? [string]
- ((comp not some)
-  false?
-  (map
-   (fn [pair] (-> pair set (filter string) count (mod 2) zero?))
-   pairs)))
+(defn balanced?
+  "are all the pairs balanced in this string?"
+  [string]
+  ((comp not some)
+   false?
+   (map
+    (fn [pair] (-> pair set (filter string) count (mod 2) zero?))
+    pairs)))
 
 (defn- fire [Q jta txt off att this]
   (EDT (.setEditable jta false))
